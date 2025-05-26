@@ -1,5 +1,5 @@
 /** @type {import('tailwindcss').Config} */
-export default {
+module.exports = {
   content: [
     "./src/*.jsx"
   ],
@@ -8,4 +8,3 @@ export default {
   },
   plugins: [],
 }
-
