@@ -9,6 +9,7 @@ const User = require('./models/User');
 const Message = require('./models/Message');
 const ws = require('ws');
 const fs = require('fs');
+const Redis = require('ioredis')
 
 dotenv.config();
 mongoose.connect(process.env.MONGO_URL, (err) => {
@@ -16,6 +17,19 @@ mongoose.connect(process.env.MONGO_URL, (err) => {
 });
 const jwtSecret = process.env.JWT_SECRET;
 const bcryptSalt = bcrypt.genSaltSync(10);
+
+const pub = new Redis({
+  host: process.env.REDIS_HOST,
+  port: process.env.REDIS_PORT,
+  username: process.env.REDIS_USERNAME,
+  password: process.env.REDIS_PASSWORD
+})
+const sub = new Redis({
+  host: process.env.REDIS_HOST,
+  port: process.env.REDIS_PORT,
+  username: process.env.REDIS_USERNAME,
+  password: process.env.REDIS_PASSWORD
+})
 
 const app = express();
 app.use('/uploads', express.static(__dirname + '/uploads'));
@@ -162,6 +176,7 @@ wss.on('connection', (connection, req) => {
   connection.on('message', async (message) => {
     const messageData = JSON.parse(message.toString());
     const {recipient, text, file} = messageData;
+    sub.subscribe('MESSAGES')
     let filename = null;
     if (file) {
       console.log('size', file.data.length);
@@ -181,16 +196,26 @@ wss.on('connection', (connection, req) => {
         text,
         file: file ? filename : null,
       });
+      await pub.publish('MESSAGES', JSON.stringify({
+        sender:connection.userId,
+        recipient,
+        text,
+        file: file ? filename : null,
+      }))
       console.log('created message');
-      [...wss.clients]
-        .filter(c => c.userId === recipient)
-        .forEach(c => c.send(JSON.stringify({
-          text,
-          sender:connection.userId,
-          recipient,
-          file: file ? filename : null,
-          _id:messageDoc._id,
-        })));
+      sub.on('message', (channel, message) => {
+        // if (channel === 'MESSAGES') {
+          [...wss.clients]
+          .filter(c => c.userId === recipient)
+          .forEach(c => c.send(JSON.stringify({ 
+            text,
+            sender:connection.userId,
+            recipient,
+            file: file ? filename : null,
+            _id:messageDoc._id,
+          })));
+        // }
+      });
     }
   });
 
