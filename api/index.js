@@ -10,6 +10,8 @@ const Message = require('./models/Message');
 const ws = require('ws');
 const fs = require('fs');
 const Redis = require('ioredis')
+const multer = require('multer');
+const AWS = require('aws-sdk')
 
 dotenv.config();
 mongoose.connect(process.env.MONGO_URL, (err) => {
@@ -17,6 +19,14 @@ mongoose.connect(process.env.MONGO_URL, (err) => {
 });
 const jwtSecret = process.env.JWT_SECRET;
 const bcryptSalt = bcrypt.genSaltSync(10);
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+const s3 = new AWS.S3({
+  region: 'us-east-2',
+  accessKeyId: process.env.S3_ACCESS_KEY,
+  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+});
 
 const pub = new Redis({
   host: process.env.REDIS_HOST,
@@ -126,6 +136,30 @@ app.post('/api/register', async (req,res) => {
   }
 });
 
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ error: 'No file provided' });
+
+  const parts = file.originalname.split('.');
+  const ext = parts[parts.length - 1];
+  const filename = Date.now() + '.'+ext;
+
+  try {
+    const result = await s3.upload({
+      Bucket: process.env.S3_BUCKET_NAME,
+      Key: filename,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+      ACL: 'public-read',
+    }).promise();
+
+    res.json({ url: result.Location });
+  } catch (err) {
+    console.error('S3 upload error:', err);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
 const server = app.listen(4040);
 
 const wss = new ws.WebSocketServer({server});
@@ -177,30 +211,18 @@ wss.on('connection', (connection, req) => {
     const messageData = JSON.parse(message.toString());
     const {recipient, text, file} = messageData;
     sub.subscribe('MESSAGES')
-    let filename = null;
-    if (file) {
-      console.log('size', file.data.length);
-      const parts = file.name.split('.');
-      const ext = parts[parts.length - 1];
-      filename = Date.now() + '.'+ext;
-      const path = __dirname + '/uploads/' + filename;
-      const bufferData = new Buffer(file.data.split(',')[1], 'base64');
-      fs.writeFile(path, bufferData, () => {
-        console.log('file saved:'+path);
-      });
-    }
     if (recipient && (text || file)) {
       const messageDoc = await Message.create({
         sender:connection.userId,
         recipient,
         text,
-        file: file ? filename : null,
+        file: file ? file : null,
       });
       await pub.publish('MESSAGES', JSON.stringify({
         sender:connection.userId,
         recipient,
         text,
-        file: file ? filename : null,
+        file: file ? file : null,
       }))
       console.log('created message');
       sub.on('message', (channel, message) => {
@@ -211,7 +233,7 @@ wss.on('connection', (connection, req) => {
             text,
             sender:connection.userId,
             recipient,
-            file: file ? filename : null,
+            file: file ? file : null,
             _id:messageDoc._id,
           })));
         // }
