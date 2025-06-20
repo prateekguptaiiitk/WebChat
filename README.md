@@ -19,6 +19,102 @@ The Scalable WebChat Application is a full-stack, real-time chat platform built 
 
 ---
 
+## System Design Deep Dive
+
+## 🎯 Problem Statement
+
+Design and implement a **real-time web chat application** that supports:
+
+- One-on-one messaging
+- File sharing (via AWS S3)
+- User presence tracking (online/offline)
+- Real-time delivery via WebSockets
+- Scalability using Redis Pub/Sub
+
+---
+
+## 🔍 Component Breakdown
+
+### 1. **Frontend (React.js)**
+
+- Manages routing and UI rendering.
+- Maintains WebSocket connection per session.
+- Handles optimistic message updates.
+- Supports file upload and renders file links.
+
+### 2. **Backend (Node.js + Express.js)**
+
+- REST APIs for authentication, message history, people listing.
+- File uploads handled via `multer` to in-memory buffer.
+- JWT-secured user sessions.
+- WebSocket server for real-time messaging.
+
+### 3. **MongoDB**
+
+- Stores user profiles and message history.
+- Messages are queried based on sender/recipient pairs.
+- **MongoDB Schema**:
+
+  * `User`: `{ username, passwordHash }`
+  * `Message`: `{ sender, recipient, text, file, timestamps }`
+
+### 4. **Redis Pub/Sub**
+
+- Ensures message propagation across horizontally scaled WebSocket servers.
+- Channel: `MESSAGES` (published/subscribed to by each server instance).
+
+### 5. **AWS S3**
+
+- File attachments are uploaded directly.
+- Returns public URL that is stored in DB and sent in message payload.
+
+---
+
+## 🔁 End-to-End Flow
+
+### 🔐 Login Flow
+
+1. User logs in via form (React.js).
+2. JWT is issued and stored in cookies (`HttpOnly`, `SameSite=None`, `Secure=true`).
+3. JWT used for subsequent API and WS authentication.
+
+### 💬 Messaging Flow
+
+1. Client sends message via WebSocket.
+2. Server:
+   - Validates JWT from cookie.
+   - Persists message to MongoDB.
+   - Publishes to Redis `MESSAGES` channel.
+3. All subscribed servers receive the event.
+4. If any server has a WebSocket open for the recipient, it forwards the message.
+
+### 📁 File Upload Flow
+
+1. File is uploaded via `/upload` REST endpoint.
+2. `multer` parses file → buffered to memory.
+3. AWS S3 SDK uploads file with public-read ACL.
+4. S3 URL is returned and included in WebSocket payload.
+
+---
+
+## 🔐 Security Measures
+
+- Passwords hashed with bcrypt.
+- JWT used for stateless session management.
+- CORS configured to allow specific origins.
+- File uploads size-limited via `multer` + S3 MIME type validation.
+
+---
+
+## 📈 Scalability Considerations
+
+- Stateless server instances → horizontal scaling behind NGINX/ALB.
+- Redis enables WebSocket consistency across instances.
+- MongoDB used as persistent store (can migrate to Atlas for global replication).
+- S3 offloads binary storage — cheap and scalable.
+
+---
+
 ### 📆 Tech Stack
 
 | Layer         | Technology         |
@@ -33,17 +129,22 @@ The Scalable WebChat Application is a full-stack, real-time chat platform built 
 
 ---
 
-### ⚙️ System Design Highlights
+## 📂 File Structure (Partial)
 
-* **WebSocket Connections**: Each client establishes a WebSocket connection after authentication. The server uses JWT in cookies to validate the user.
-* **Redis Pub/Sub**: Ensures messages are routed to the correct recipient even if multiple WebSocket servers are used.
-* **MongoDB Schema**:
+```
+client/
+├── Chat.jsx
+├── Contact.jsx
+├── UserContext.jsx
+├── Routes.jsx
+└── App.jsx
 
-  * `User`: `{ username, passwordHash }`
-  * `Message`: `{ sender, recipient, text, file, timestamps }`
-* **S3 Integration**: Uses `multer.memoryStorage()` for efficient file buffering and `AWS-SDK` for upload.
-
----
+server/
+├── models/
+│   ├── Message.js
+│   └── User.js
+├── index.js
+```
 
 ### 📉 End-to-End Flow
 
@@ -57,8 +158,32 @@ The Scalable WebChat Application is a full-stack, real-time chat platform built 
 
 ### 📅 Future Improvements
 
-* Add typing indicators
-* Implement message read receipts
-* Use signed URLs for private file access
-* Use load balancer (Nginx) for round-robin WebSocket distribution
+- Add typing indicators
+- Implement message read receipts
+- Use load balancer (Nginx) for round-robin WebSocket distribution
+- Group chat support
+- Rate limiting & abuse detection
+- End-to-end encryption
+- MongoDB indexes for faster querying
+- Redis cache layer for frequent messages
 
+## Author
+
+<table>
+<tr>
+<td align="center">
+     <img src="https://avatars2.githubusercontent.com/u/29523950?s=400&u=878e242ca2c624eb45a62bf62ae580a370b7a0ae&v=4" width="180"/>
+
+<p><strong>Prateek Gupta</strong></p>
+
+<p align="center">
+<a href="https://github.com/prateekguptaiiitk">
+  <img src="http://www.iconninja.com/files/241/825/211/round-collaboration-social-github-code-circle-network-icon.svg" width="36" height="36"/>
+</a>
+<a href="https://www.linkedin.com/in/prateekjpg/">
+  <img src="http://www.iconninja.com/files/863/607/751/network-linkedin-social-connection-circular-circle-media-icon.svg" width="36" height="36"/>
+</a>
+</p>
+</td>
+</tr> 
+</table>
